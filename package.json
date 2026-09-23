@@ -1,0 +1,19 @@
+{
+  "name": "iva-meeting-transcription",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p plugin/sh.iva/tsconfig.json",
+    "test": "node --test test/*.test.mjs",
+    "check": "node scripts/check.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.x",
+    "eve": "0.51.1",
+    "typescript": "~6.0.3",
+    "zod": "4.4.3"
+  },
+  "engines": { "node": "24.x" }
+}

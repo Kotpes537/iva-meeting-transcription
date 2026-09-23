@@ -1,0 +1,65 @@
+diff --git a/agent/lib/telegram-media.test.ts b/agent/lib/telegram-media.test.ts
+index af23399..c80944e 100644
+--- a/agent/lib/telegram-media.test.ts
++++ b/agent/lib/telegram-media.test.ts
+@@ -140,6 +140,34 @@ function doc(): RawMedia {
+   };
+ }
+ 
++await test("large M4A is handed to the meeting plugin when enabled", async (t) => {
++  process.env.IVA_MEETING_LARGE_MEDIA_HANDOFF = "1";
++  t.after(() => { delete process.env.IVA_MEETING_LARGE_MEDIA_HANDOFF; });
++  const { calls, effects } = harness({
++    request: () => Promise.resolve({ body: { description: "file is too big" } }),
++  });
++  const part = await media.processMediaPart(
++    effects,
++    { message_id: 20, caption: "Оба варианта в Word" },
++    { ...doc(), fileId: "meeting-file-id", fileName: "meeting.m4a", mimeType: "audio/mp4" },
++  );
++  assert.equal(part.kind, "context");
++  assert.match(part.context[0], /file_id="meeting-file-id"/u);
++  assert.match(part.context[0], /file_name="meeting.m4a"/u);
++  assert.equal(calls.sent.length, 0);
++});
++
++await test("large PDF keeps the existing size warning", async (t) => {
++  process.env.IVA_MEETING_LARGE_MEDIA_HANDOFF = "1";
++  t.after(() => { delete process.env.IVA_MEETING_LARGE_MEDIA_HANDOFF; });
++  const { calls, effects } = harness({
++    request: () => Promise.resolve({ body: { description: "file is too big" } }),
++  });
++  const part = await media.processMediaPart(effects, { message_id: 21 }, doc());
++  assert.equal(part.kind, "too-big");
++  assert.equal(calls.sent.length, 1);
++});
++
+ await test("чистое описание картинки едет утвердительной фразой, как раньше", async (t) => {
+   stubDownload(t);
+   const { effects } = harness();
+diff --git a/agent/lib/telegram-media.ts b/agent/lib/telegram-media.ts
+index e97841f..23ce49d 100644
+--- a/agent/lib/telegram-media.ts
++++ b/agent/lib/telegram-media.ts
+@@ -137,6 +137,21 @@ export async function processMediaPart(
+       if (!rel) {
+         const file = await fetchTelegramFile(effects.request, media.fileId);
+         if (file && "tooBig" in file) {
++          const largeMeetingAudio =
++            process.env.IVA_MEETING_LARGE_MEDIA_HANDOFF === "1" &&
++            media.tag === "document" &&
++            /\.(?:mp3|m4a)$/iu.test(media.fileName ?? "") &&
++            Boolean(media.fileId);
++          if (largeMeetingAudio) {
++            const context = [
++              `${tag} large meeting audio (not downloaded by the cloud Bot API). ` +
++              `Use the meeting transcription plugin with file_id=${JSON.stringify(media.fileId)} ` +
++              `and file_name=${JSON.stringify(media.fileName)}.`,
++            ];
++            if (caption) context.push(sanitizeInbound(caption).text);
++            appendDaily(tag, "(large meeting audio handed to plugin)");
++            return { kind: "context", context };
++          }
+           appendDaily(
+             tag,
+             `${tr("(file >20MB — Telegram won't hand it to bots)", "(файл >20MB — Telegram не отдаёт его ботам)")}${capSuffix}`,

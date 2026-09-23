@@ -1,0 +1,4 @@
+packages:
+  - plugin/sh.iva
+minimumReleaseAgeExclude:
+  - docx@9.7.2

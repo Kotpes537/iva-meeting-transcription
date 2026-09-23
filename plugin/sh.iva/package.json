@@ -1,0 +1,27 @@
+{
+  "name": "sh.iva.meeting-transcription",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
+  },
+  "dependencies": {
+    "docx": "9.7.2",
+    "zod": "4.4.3"
+  },
+  "peerDependencies": { "eve": "0.51.1" },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs"
+    }
+  }
+}

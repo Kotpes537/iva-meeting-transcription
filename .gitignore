@@ -1,0 +1,8 @@
+node_modules/
+plugin/sh.iva/node_modules/
+plugin/sh.iva/dist/
+*.env
+*.m4a
+*.mp3
+*.docx
+*.jsonl
