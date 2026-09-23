@@ -2,7 +2,7 @@
 
 Плагин принимает запись встречи в `.m4a` или `.mp3` из личного чата владельца, отправляет короткие тезисы ответом в Telegram и возвращает `.docx` в тот же чат. Для Word можно выбрать `только итоги`, `только транскрипт` или `оба раздела`; по умолчанию — оба. Транскрипт содержит тайминги начала и конца каждой реплики и автоматические метки спикеров.
 
-Пакет устроен как [iva-file-delivery](https://github.com/mamysh/iva-file-delivery): Agent Plugin в `plugin/`, навык и Eve Extension с инструментом и расписанием. Исходная запись и промежуточные данные остаются в приватной папке Iva. Для распознавания используется Deepgram, для итогов — Gemini; это облачные сервисы.
+Пакет устроен как [iva-file-delivery](https://github.com/mamysh/iva-file-delivery): Agent Plugin в `plugin/`, навык и Eve Extension с инструментом и расписанием. Исходная запись и промежуточные данные остаются в приватной папке Iva. Для распознавания используется Deepgram; итоги составляет модель, выбранная в самой Iva через `MODEL_PROVIDER`. Отдельный ключ LLM для плагина не нужен.
 
 ## Статус проверки
 
@@ -12,7 +12,7 @@
 
 ## Требования
 
-Iva 0.4.7, Node.js 24, `ffprobe`, ключи `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`, `TELEGRAM_BOT_TOKEN`, переменные `ASSISTANT_DATA_DIR`, `ASSISTANT_VAULT_DIR`, `TELEGRAM_ALLOWED_USER_IDS`. Для файлов больше 20 МБ нужен локальный Telegram Bot API сервер и `TELEGRAM_BOT_API_URL=http://127.0.0.1:8081`. Плагин ограничивает вход 2 ГБ; фактический потолок загрузки зависит от Telegram, свободного диска и провайдеров.
+Iva 0.4.7 с настроенным `MODEL_PROVIDER`, Node.js 24, `ffprobe`, ключи `DEEPGRAM_API_KEY`, `TELEGRAM_BOT_TOKEN`, переменные `ASSISTANT_DATA_DIR`, `ASSISTANT_VAULT_DIR`, `TELEGRAM_ALLOWED_USER_IDS`. Для файлов больше 20 МБ нужен локальный Telegram Bot API сервер и `TELEGRAM_BOT_API_URL=http://127.0.0.1:8081`. Плагин ограничивает вход 2 ГБ; фактический потолок загрузки зависит от Telegram, свободного диска и провайдеров.
 
 Текущая Iva 0.4.7 отбрасывает документы больше 20 МБ до вызова плагина. Для отправки большого аудио *одним файлом прямо в чат* нужен небольшой патч Iva из [`compat/iva-0.4.7-large-audio.patch`](compat/iva-0.4.7-large-audio.patch). Он передаёт `file_id` только для `.m4a`/`.mp3`, когда включён `IVA_MEETING_LARGE_MEDIA_HANDOFF=1`. Плагин получает файл через локальный Bot API. Для остальных больших вложений прежний порядок сохраняется. На других версиях Iva патч нужно сверить с их кодом.
 
@@ -21,7 +21,7 @@ Iva 0.4.7, Node.js 24, `ffprobe`, ключи `DEEPGRAM_API_KEY`, `GEMINI_API_KEY
 Сначала сделайте резервную копию работающей сборки Iva и загрузите репозиторий на сервер. Проверьте патч на исходниках своей Iva. Команды ниже предполагают каталог с исходниками Iva и собранный Extension. Это инструкция для установки после проверки, а не выполненные действия.
 
 ```bash
-git clone --branch v0.1.0 https://github.com/Kotpes537/iva-meeting-transcription.git
+git clone --branch v0.2.0 https://github.com/Kotpes537/iva-meeting-transcription.git
 ```
 
 ```bash
@@ -29,13 +29,13 @@ git apply --check /path/to/iva-meeting-transcription/compat/iva-0.4.7-large-audi
 git apply /path/to/iva-meeting-transcription/compat/iva-0.4.7-large-audio.patch
 ```
 
-Добавьте в окружение Iva `IVA_MEETING_LARGE_MEDIA_HANDOFF=1`, `TELEGRAM_BOT_API_URL=http://127.0.0.1:8081` и, при необходимости, `MEETING_SUMMARY_MODEL=gemini-3.6-flash`. Затем соберите Iva по её штатной процедуре и установите плагин:
+Для больших файлов добавьте в окружение Iva `IVA_MEETING_LARGE_MEDIA_HANDOFF=1` и `TELEGRAM_BOT_API_URL=http://127.0.0.1:8081`. Плагин использует уже выбранные в Iva модель и доступ к ней. Затем соберите Iva по её штатной процедуре и установите плагин:
 
 ```bash
 cd /path/to/iva-meeting-transcription
 pnpm install --frozen-lockfile
 pnpm run check
-iva plugin add Kotpes537/iva-meeting-transcription/plugin@v0.1.0
+iva plugin add Kotpes537/iva-meeting-transcription/plugin@v0.2.0
 iva plugin list
 iva doctor
 ```
@@ -64,5 +64,7 @@ pnpm run check
 ```
 
 Промпт для итогов находится в [`pipeline.ts`](plugin/sh.iva/extension/lib/pipeline.ts). Он требует тайминг для каждого решения, задачи и открытого вопроса, запрещает домысливать участников и сроки. Автоматическая проверка подтверждает наличие тайминга, но не смысловую точность: перед управленческим использованием итоги и реплики нужно сверить с аудио.
+
+Саммари использует выбранную в Iva модель, но по умолчанию снижает усилие рассуждения только для своей фоновой задачи до `low`. Настройка обычного чата при этом не меняется. При необходимости задайте `MEETING_SUMMARY_THINKING_EFFORT=medium`, `high`, `max` или `inherit` для использования общего значения Iva. Плагин ждёт ответ до 10 минут на попытку. Отдельного ключа или модели Gemini в плагине нет.
 
 Word отправляется через обычный Bot API и ограничен 50 МБ. Очень длинный транскрипт может превысить этот размер; тогда задача завершится ошибкой в журнале, пока не будет добавлено разбиение на части. Название файла и текст встречи могут быть конфиденциальными: храните пакет и результаты в закрытом доступе.

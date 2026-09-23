@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { cleanName, privateTarget } from "../plugin/sh.iva/extension/lib/jobs.ts";
-import { createWord, timecode, transcriptLines } from "../plugin/sh.iva/extension/lib/pipeline.ts";
+import { createWord, summarize, timecode, transcriptLines } from "../plugin/sh.iva/extension/lib/pipeline.ts";
 
 test("the recipient comes only from an authenticated private owner turn", () => {
   const auth = { principalType: "user", attributes: { chat_id: "123", user_id: "123", chat_type: "private", message_id: "456" } };
@@ -42,4 +42,28 @@ test("all three Word modes produce nonempty DOCX files", async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("the selected Iva model can summarize without a Gemini key", async () => {
+  let called = false;
+  const utterances = [
+    { start: 1, end: 2, transcript: "Первый вопрос." },
+    { start: 3, end: 4, transcript: "Проверим второй вопрос." },
+  ];
+  const summary = await summarize(utterances, async (system, prompt) => {
+    called = true;
+    assert.match(system, /не придумывай имена/iu);
+    assert.match(prompt, /\[00:00:01\] Первый вопрос/u);
+    return JSON.stringify({
+      overview: "Обсудили два вопроса.", agenda: ["Первый вопрос", "Второй вопрос"],
+      bullets: [
+        { text: "Обсудили первый вопрос.", evidence: "[00:00:01]" },
+        "Проверят второй вопрос [00:00:03].",
+      ],
+      topics: ["Первый вопрос", "Второй вопрос"], decisions: [], tasks: [], open_questions: [],
+    });
+  });
+  assert.equal(called, true);
+  assert.equal(summary.bullets.length, 2);
+  assert.equal(summary.bullets[0], "Обсудили первый вопрос. [00:00:01]");
 });

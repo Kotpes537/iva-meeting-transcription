@@ -77,5 +77,5 @@ export async function processPending(): Promise<void> {
 
 export default defineSchedule({
   cron: "* * * * *",
-  async run() { await processPending(); },
+  run({ waitUntil }) { waitUntil(processPending()); },
 });

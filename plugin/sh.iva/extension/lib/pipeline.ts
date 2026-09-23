@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { copyFile, readFile, realpath, stat, statfs, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
+import { Worker } from "node:worker_threads";
 import { Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import type { MeetingJob, Mode } from "./jobs.ts";
 
@@ -144,7 +145,15 @@ function verifySummary(value: unknown, utterances: Utterance[]): Summary {
   const array = (key: string) => Array.isArray(raw[key]) ? raw[key] as unknown[] : [];
   const overview = typeof raw.overview === "string" && raw.overview.length <= 800 ? raw.overview : "Цель встречи не установлена по записи.";
   const agenda = array("agenda").filter((x): x is string => typeof x === "string" && x.length <= 150).slice(0, 15);
-  const bullets = array("bullets").filter((x): x is string => typeof x === "string" && x.length <= 550 && /\[\d{2}:\d{2}:\d{2}\]/u.test(x)).slice(0, 7);
+  const bullets = array("bullets").map((value) => {
+    if (typeof value === "string" && value.length <= 550 && [...stamps].some((stamp) => value.includes(stamp))) return value;
+    if (value && typeof value === "object") {
+      const item = value as { text?: unknown; evidence?: unknown };
+      if (typeof item.text === "string" && item.text.length <= 500 && grounded(item as { evidence?: string }))
+        return `${item.text} ${item.evidence}`;
+    }
+    return null;
+  }).filter((value): value is string => value !== null).slice(0, 7);
   const topics = array("topics").filter((x): x is string => typeof x === "string" && x.length <= 100).slice(0, 20);
   const decisions = array("decisions").filter((x): x is Summary["decisions"][number] => !!x && typeof x === "object" && typeof (x as any).decision === "string" && grounded(x as any));
   const tasks = array("tasks").filter((x): x is Summary["tasks"][number] => !!x && typeof x === "object" && typeof (x as any).task === "string" && grounded(x as any)).map((task) => ({
@@ -157,33 +166,73 @@ function verifySummary(value: unknown, utterances: Utterance[]): Summary {
   return { overview, agenda, bullets, topics, decisions, tasks, open_questions };
 }
 
-export async function summarize(utterances: Utterance[], env = process.env): Promise<Summary> {
-  const key = env.GEMINI_API_KEY?.trim();
-  if (!key) throw new Error("Gemini key is missing");
-  const model = (env.MEETING_SUMMARY_MODEL || "gemini-3.6-flash").replace(/^models\//u, "");
-  const text = utterances.map((u) => `[${timecode(u.start)}] ${u.transcript}`).join("\n");
-  const body = {
-    systemInstruction: { parts: [{ text: SUMMARY_INSTRUCTIONS }] },
-    contents: [{ role: "user", parts: [{ text: `ТРАНСКРИПТ:\n${text}` }] }],
-    generationConfig: { responseMimeType: "application/json", temperature: 0.1 },
-  };
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-      method: "POST",
-      headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(180_000),
+const IVA_SUMMARY_WORKER = String.raw`
+const { parentPort, workerData } = require("node:worker_threads");
+const { createRequire } = require("node:module");
+const { resolve } = require("node:path");
+const { pathToFileURL } = require("node:url");
+void (async () => {
+  const root = workerData.root;
+  const hostRequire = createRequire(resolve(root, "package.json"));
+  const { generateText } = await import(pathToFileURL(hostRequire.resolve("ai")).href);
+  const { makeTextModel } = await import(pathToFileURL(resolve(root, "agent", "provider.ts")).href);
+  const result = await generateText({
+    model: makeTextModel({ chatModelSeesImages: () => Promise.resolve(false) }),
+    system: workerData.system,
+    prompt: workerData.prompt,
+    maxOutputTokens: 8192,
+    maxRetries: 0,
+    abortSignal: AbortSignal.timeout(580_000),
+  });
+  parentPort.postMessage({ ok: true, text: result.text });
+})().catch((error) => parentPort.postMessage({
+  ok: false, error: error instanceof Error ? error.message : "unknown model error",
+}));
+`;
+
+async function summarizeWithIva(system: string, prompt: string): Promise<string> {
+  // Use the host's provider and model. A worker has its own process.env, so
+  // a quicker summary effort does not alter concurrent Iva chat turns.
+  const rawEffort = process.env.MEETING_SUMMARY_THINKING_EFFORT || "low";
+  if (!["minimal", "low", "medium", "high", "xhigh", "max", "inherit"].includes(rawEffort))
+    throw new Error("invalid MEETING_SUMMARY_THINKING_EFFORT");
+  const workerEnv = { ...process.env };
+  if (rawEffort !== "inherit") workerEnv.THINKING_EFFORT = rawEffort;
+  return await new Promise<string>((resolveResult, rejectResult) => {
+    const worker = new Worker(IVA_SUMMARY_WORKER, {
+      eval: true,
+      env: workerEnv,
+      workerData: { root: process.cwd(), system, prompt },
     });
-    if ([429, 500, 502, 503, 504].includes(response.status) && attempt < 2) {
-      await new Promise((done) => setTimeout(done, 2_000 * 2 ** attempt));
-      continue;
-    }
-    if (!response.ok) throw new Error(`Gemini summary failed with HTTP ${response.status}`);
-    const data = await response.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-    const answer = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-    return verifySummary(JSON.parse(answer), utterances);
-  }
-  throw new Error("Gemini summary retries exhausted");
+    let finished = false;
+    const finish = (error?: Error, value?: string) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      void worker.terminate();
+      if (error) rejectResult(error);
+      else resolveResult(value ?? "");
+    };
+    const timer = setTimeout(() => finish(new Error("Iva summary model timed out after 10 minutes")), 600_000);
+    worker.on("message", (message: unknown) => {
+      const value = message as { ok?: boolean; text?: unknown; error?: unknown };
+      if (value?.ok && typeof value.text === "string") finish(undefined, value.text);
+      else finish(new Error(`Iva summary model failed: ${String(value?.error ?? "unknown")}`));
+    });
+    worker.on("error", (error) => finish(error));
+    worker.on("exit", (code) => finish(new Error(`Iva summary worker exited with code ${code}`)));
+  });
+}
+
+export async function summarize(
+  utterances: Utterance[],
+  ivaGenerate: (system: string, prompt: string) => Promise<string> = summarizeWithIva,
+): Promise<Summary> {
+  const text = utterances.map((u) => `[${timecode(u.start)}] ${u.transcript}`).join("\n");
+  const prompt = `ТРАНСКРИПТ:\n${text}`;
+  const answer = await ivaGenerate(SUMMARY_INSTRUCTIONS, prompt);
+  const clean = answer.trim().replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, "");
+  return verifySummary(JSON.parse(clean), utterances);
 }
 
 function line(value: string, heading?: boolean): Paragraph {
