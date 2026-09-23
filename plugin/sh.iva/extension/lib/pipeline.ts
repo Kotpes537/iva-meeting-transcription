@@ -259,7 +259,7 @@ async function summarizeWithIva(system: string, prompt: string): Promise<string>
       if (value?.ok && typeof value.text === "string") finish(undefined, value.text);
       else finish(new Error(`Iva summary model failed: ${String(value?.error ?? "unknown")}`));
     });
-    worker.on("error", (error) => finish(error));
+    worker.on("error", (error) => finish(error instanceof Error ? error : new Error(String(error))));
     worker.on("exit", (code) => finish(new Error(`Iva summary worker exited with code ${code}`)));
   });
 }

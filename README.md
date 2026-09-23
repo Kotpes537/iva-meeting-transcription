@@ -21,7 +21,7 @@ Iva 0.4.7 с настроенным `MODEL_PROVIDER`, Node.js 24, `ffprobe` и `
 Сначала сделайте резервную копию работающей сборки Iva и загрузите репозиторий на сервер. Проверьте патч на исходниках своей Iva. Команды ниже предполагают каталог с исходниками Iva и собранный Extension. Это инструкция для установки после проверки, а не выполненные действия.
 
 ```bash
-git clone --branch v0.2.2 https://github.com/Kotpes537/iva-meeting-transcription.git
+git clone --branch v0.2.3 https://github.com/Kotpes537/iva-meeting-transcription.git
 ```
 
 ```bash
@@ -35,7 +35,7 @@ git apply /path/to/iva-meeting-transcription/compat/iva-0.4.7-large-audio.patch
 cd /path/to/iva-meeting-transcription
 pnpm install --frozen-lockfile
 pnpm run check
-iva plugin add Kotpes537/iva-meeting-transcription/plugin@v0.2.2
+iva plugin add Kotpes537/iva-meeting-transcription/plugin@v0.2.3
 iva plugin list
 iva doctor
 ```
