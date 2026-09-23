@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { defineSchedule } from "eve/schedules";
 import { dataRoot, loadJob, saveJob, tryLock, type MeetingJob } from "../lib/jobs.ts";
 import {
-  audioMetadata, createWord, fetchLargeAudio, sendBullets, sendWord,
+  audioMetadata, createWord, fetchLargeAudio, optimizeAudio, sendBullets, sendWord,
   summarize, telegramBullets, transcribe, type Summary, type Utterance,
 } from "../lib/pipeline.ts";
 
@@ -23,10 +23,11 @@ export async function processOne(job: MeetingJob, directory: string): Promise<vo
   job.attempts += 1;
   await saveJob(job);
   try {
-    const audio = job.sourcePath ?? await fetchLargeAudio(job, directory);
-    job.sourcePath = audio;
+    const sourceAudio = job.sourcePath ?? await fetchLargeAudio(job, directory);
+    job.sourcePath = sourceAudio;
     await saveJob(job);
-    const metadata = await readOrCompute(join(directory, "metadata.json"), () => audioMetadata(audio, job.fileName));
+    const metadata = await readOrCompute(join(directory, "metadata.json"), () => audioMetadata(sourceAudio, job.fileName));
+    const audio = await optimizeAudio(sourceAudio, directory);
     const utterances = await readOrCompute<Utterance[]>(join(directory, "transcript.json"), () => transcribe(audio));
     const summary = await readOrCompute<Summary>(join(directory, "summary.json"), () => summarize(utterances));
     if (!job.bulletsMessageId) {

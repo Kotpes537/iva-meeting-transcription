@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { copyFile, readFile, realpath, stat, statfs, writeFile } from "node:fs/promises";
+import { copyFile, readFile, realpath, stat, statfs, unlink, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
@@ -90,6 +90,46 @@ export async function audioMetadata(path: string, fileName: string): Promise<{ d
     duration,
     dateLabel: created ? `${fromName}; метаданные файла: ${created}${offset ? `, смещение ${offset}` : ""}` : fromName,
   };
+}
+
+type AudioStreamInfo = { codec_type?: string; codec_name?: string; sample_rate?: string; channels?: number; channel_layout?: string; disposition?: { attached_pic?: number } };
+
+async function audioStreamSignature(path: string): Promise<string> {
+  const { stdout } = await execFileAsync("ffprobe", [
+    "-v", "error", "-show_entries", "stream=codec_type,codec_name,sample_rate,channels,channel_layout:stream_disposition=attached_pic",
+    "-of", "json", path,
+  ], { timeout: 30_000 });
+  const data = JSON.parse(stdout) as { streams?: AudioStreamInfo[] };
+  const streams = (data.streams ?? []).filter((stream) => stream.codec_type === "audio");
+  if (!streams.length) throw new Error("audio stream is unavailable");
+  if ((data.streams ?? []).some((stream) => stream.codec_type !== "audio" && stream.disposition?.attached_pic !== 1))
+    throw new Error("non-audio content is present");
+  return JSON.stringify(streams.map(({ codec_name, sample_rate, channels, channel_layout }) => ({ codec_name, sample_rate, channels, channel_layout })));
+}
+
+/** Strip optional container data while stream-copying audio without decoding or re-encoding it. */
+export async function optimizeAudio(path: string, directory: string): Promise<string> {
+  const ext = extname(path).toLowerCase();
+  if (ext !== ".mp3" && ext !== ".m4a") return path;
+  const source = await stat(path);
+  const disk = await statfs(directory);
+  if (source.size > disk.bavail * disk.bsize * 0.8) return path;
+  const target = join(directory, `audio-clean${ext}`);
+  await unlink(target).catch(() => undefined);
+  try {
+    const originalSignature = await audioStreamSignature(path);
+    await execFileAsync("ffmpeg", [
+      "-hide_banner", "-loglevel", "error", "-y", "-i", path,
+      "-map", "0:a", "-c:a", "copy", "-map_metadata", "-1", "-vn", "-sn", "-dn", target,
+    ], { timeout: 120_000, maxBuffer: 1_000_000 });
+    if (originalSignature !== await audioStreamSignature(target)) throw new Error("audio stream verification failed");
+    const optimized = await stat(target);
+    if (optimized.size < source.size) return target;
+  } catch (error) {
+    console.warn("[meeting-transcription] lossless audio cleanup skipped:", error instanceof Error ? error.message : "unknown error");
+  }
+  await unlink(target).catch(() => undefined);
+  return path;
 }
 
 export async function transcribe(path: string, env = process.env): Promise<Utterance[]> {
@@ -242,7 +282,7 @@ function line(value: string, heading?: boolean): Paragraph {
 function tableCell(text: string): TableCell { return new TableCell({ children: [line(text)] }); }
 
 export async function createWord(job: MeetingJob, summary: Summary, utterances: Utterance[], metadata: { duration: number; dateLabel: string }, directory: string): Promise<string> {
-  const title = job.mode === "bullets" ? "Встреча: итоги" : job.mode === "transcript" ? "Встреча: полный транскрипт" : "Встреча: итоги и транскрипт";
+  const title = job.mode === "bullets" ? "Встреча: краткие итоги и полный транскрипт" : job.mode === "transcript" ? "Встреча: полный транскрипт" : "Встреча: подробные итоги и полный транскрипт";
   const detectedSpeakers = new Set(utterances.map((u) => u.speaker).filter((x): x is number => Number.isInteger(x))).size;
   const children: (Paragraph | Table)[] = [
     new Paragraph({ text: title, heading: HeadingLevel.TITLE }),
@@ -251,39 +291,39 @@ export async function createWord(job: MeetingJob, summary: Summary, utterances: 
     line(`Участники: имена по записи надёжно не установлены; автоматически выделено голосов: ${detectedSpeakers}. Число и атрибуция спикеров требуют проверки.`),
   ];
   if (job.mode !== "transcript") {
-    children.push(line("Общее описание", true));
-    children.push(line(summary.overview || "Цель встречи не установлена по записи."));
-    children.push(line("Темы, восстановленные по обсуждению", true));
-    children.push(line(summary.agenda?.length ? summary.agenda.join("; ") : "Повестка явно не названа."));
     children.push(line("Краткие итоги", true));
     for (const bullet of summary.bullets) children.push(new Paragraph({ text: bullet, bullet: { level: 0 } }));
-    children.push(line(`Обсуждено тем и вопросов: ${summary.topics.length}; подтверждено решений: ${summary.decisions.length}; открытых вопросов: ${summary.open_questions.length}.`));
-    if (summary.tasks.length) {
-      children.push(line("Задачи", true));
-      children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [
-        new TableRow({ children: ["Задача", "Ответственный", "Срок", "Источник"].map(tableCell) }),
-        ...summary.tasks.map((task) => new TableRow({ children: [task.task, task.owner || "не назван", task.due || "не назван", task.evidence].map(tableCell) })),
-      ] }));
-    }
-    if (summary.decisions.length) {
-      children.push(line("Подтверждённые решения", true));
-      for (const item of summary.decisions) children.push(new Paragraph({ text: `${item.decision} ${item.evidence}`, bullet: { level: 0 } }));
-    }
-    if (summary.open_questions.length) {
-      children.push(line("Открытые вопросы", true));
-      for (const item of summary.open_questions) children.push(new Paragraph({ text: `${item.question} ${item.evidence}`, bullet: { level: 0 } }));
+    if (job.mode === "both") {
+      children.push(line("Общее описание", true));
+      children.push(line(summary.overview || "Цель встречи не установлена по записи."));
+      children.push(line("Темы, восстановленные по обсуждению", true));
+      children.push(line(summary.agenda?.length ? summary.agenda.join("; ") : "Повестка явно не названа."));
+      children.push(line(`Обсуждено тем и вопросов: ${summary.topics.length}; подтверждено решений: ${summary.decisions.length}; открытых вопросов: ${summary.open_questions.length}.`));
+      if (summary.tasks.length) {
+        children.push(line("Задачи", true));
+        children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [
+          new TableRow({ children: ["Задача", "Ответственный", "Срок", "Источник"].map(tableCell) }),
+          ...summary.tasks.map((task) => new TableRow({ children: [task.task, task.owner || "не назван", task.due || "не назван", task.evidence].map(tableCell) })),
+        ] }));
+      }
+      if (summary.decisions.length) {
+        children.push(line("Подтверждённые решения", true));
+        for (const item of summary.decisions) children.push(new Paragraph({ text: `${item.decision} ${item.evidence}`, bullet: { level: 0 } }));
+      }
+      if (summary.open_questions.length) {
+        children.push(line("Открытые вопросы", true));
+        for (const item of summary.open_questions) children.push(new Paragraph({ text: `${item.question} ${item.evidence}`, bullet: { level: 0 } }));
+      }
     }
   }
   children.push(line("Ограничение: это автоматический транскрипт. Слова, числа и спикеров сверяйте с аудио до использования в решениях."));
-  if (job.mode !== "bullets") {
-    children.push(new Paragraph({ text: "Полный автоматический транскрипт", heading: HeadingLevel.HEADING_1, pageBreakBefore: true }));
-    for (const utterance of utterances) {
-      const speaker = Number.isInteger(utterance.speaker) ? Number(utterance.speaker) + 1 : "?";
-      children.push(new Paragraph({ children: [
-        new TextRun({ text: `[${timecode(utterance.start)}–${timecode(utterance.end)}] Спикер ${speaker}: `, bold: true }),
-        new TextRun(utterance.transcript),
-      ] }));
-    }
+  children.push(new Paragraph({ text: "Полный автоматический транскрипт", heading: HeadingLevel.HEADING_1, pageBreakBefore: true }));
+  for (const utterance of utterances) {
+    const speaker = Number.isInteger(utterance.speaker) ? Number(utterance.speaker) + 1 : "?";
+    children.push(new Paragraph({ children: [
+      new TextRun({ text: `[${timecode(utterance.start)}–${timecode(utterance.end)}] Спикер ${speaker}: `, bold: true }),
+      new TextRun(utterance.transcript),
+    ] }));
   }
   const doc = new Document({ sections: [{ children }] });
   const target = join(directory, `meeting-${job.id}-${job.mode}.docx`);

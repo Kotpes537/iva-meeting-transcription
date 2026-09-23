@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createJob, privateTarget } from "../lib/jobs.ts";
 
 export default defineTool({
-  description: "Queue an MP3 or M4A meeting recording from the owner's private Telegram chat. Background processing sends summary bullets and a Word report to the same chat.",
+  description: "Queue an MP3 or M4A meeting recording from the owner's private Telegram chat. Background processing sends summary bullets and a Word report containing the full transcript to the same chat.",
   inputSchema: z.object({
     path: z.string().optional().describe("Source path relative to vault/attachments for a file already saved by Iva"),
     file_id: z.string().optional().describe("Telegram file_id provided by the inbound channel for a large file"),
