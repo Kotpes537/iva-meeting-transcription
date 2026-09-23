@@ -22,22 +22,29 @@ export async function processOne(job: MeetingJob, directory: string): Promise<vo
   job.state = "working";
   job.attempts += 1;
   await saveJob(job);
+  let transcriptForFallback: Utterance[] | null = null;
+  let metadataForFallback: { duration: number; dateLabel: string } | null = null;
+  let summaryReady = false;
   try {
     const sourceAudio = job.sourcePath ?? await fetchLargeAudio(job, directory);
     job.sourcePath = sourceAudio;
     await saveJob(job);
     const metadata = await readOrCompute(join(directory, "metadata.json"), () => audioMetadata(sourceAudio, job.fileName));
+    metadataForFallback = metadata;
     const audio = await optimizeAudio(sourceAudio, directory);
     const utterances = await readOrCompute<Utterance[]>(join(directory, "transcript.json"), () => transcribe(audio));
+    transcriptForFallback = utterances;
     const summary = await readOrCompute<Summary>(join(directory, "summary.json"), () => summarize(utterances));
+    summaryReady = true;
+    if (!job.documentMessageId || job.documentIsFallback) {
+      const report = await createWord(job, summary, utterances, metadata, directory);
+      job.documentMessageId = await sendWord(job, report);
+      job.documentIsFallback = false;
+      await saveJob(job);
+    }
     if (!job.bulletsMessageId) {
       job.bulletsMessageId = await sendBullets(job, telegramBullets(summary, metadata));
       job.state = "bullets_sent";
-      await saveJob(job);
-    }
-    if (!job.documentMessageId) {
-      const report = await createWord(job, summary, utterances, metadata, directory);
-      job.documentMessageId = await sendWord(job, report);
       await saveJob(job);
     }
     job.state = "done";
@@ -46,8 +53,23 @@ export async function processOne(job: MeetingJob, directory: string): Promise<vo
     job.error = error instanceof Error ? error.message.slice(0, 180) : "processing failed";
     job.state = job.attempts >= 3 ? "failed" : "queued";
     await saveJob(job);
+    if (!summaryReady && transcriptForFallback && metadataForFallback && !job.documentMessageId) {
+      try {
+        const fallbackJob = { ...job, mode: "transcript" as const };
+        const emptySummary: Summary = { overview: "", agenda: [], bullets: [], topics: [], decisions: [], tasks: [], open_questions: [] };
+        const report = await createWord(fallbackJob, emptySummary, transcriptForFallback, metadataForFallback, directory);
+        job.documentMessageId = await sendWord(job, report);
+        job.documentIsFallback = true;
+        await saveJob(job);
+      } catch (fallbackError) {
+        console.error("[meeting-transcription] transcript Word fallback failed:", job.id, fallbackError instanceof Error ? fallbackError.message : "unknown");
+      }
+    }
     if (job.state === "failed") {
-      await sendBullets(job, "Не удалось завершить транскрибацию встречи. Запись сохранена; причина указана в журнале задачи. Повторная отправка не требуется до проверки ошибки.").catch(() => undefined);
+      const notice = job.documentIsFallback
+        ? "Полный транскрипт отправлен в Word. Не удалось подготовить итоги встречи; причина указана в журнале задачи."
+        : "Не удалось завершить транскрибацию встречи. Запись сохранена; причина указана в журнале задачи. Повторная отправка не требуется до проверки ошибки.";
+      await sendBullets(job, notice).catch(() => undefined);
     }
     throw error;
   }

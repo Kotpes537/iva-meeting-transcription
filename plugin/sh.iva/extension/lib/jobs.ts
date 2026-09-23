@@ -17,6 +17,7 @@ export type MeetingJob = {
   attempts: number;
   bulletsMessageId?: number;
   documentMessageId?: number;
+  documentIsFallback?: boolean;
   error?: string;
 };
 

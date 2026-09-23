@@ -362,10 +362,19 @@ export async function sendBullets(job: MeetingJob, text: string, env = process.e
 export async function sendWord(job: MeetingJob, path: string, env = process.env): Promise<number> {
   if (!allowedOwner(job.chatId, env)) throw new Error("Telegram owner is no longer allowed");
   const content = await readFile(path);
-  const form = new FormData();
-  form.append("chat_id", job.chatId);
-  if (job.messageId) form.append("reply_to_message_id", String(job.messageId));
-  form.append("document", new Blob([new Uint8Array(content)], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }), basename(path));
-  const result = await telegramMethod("sendDocument", form, false, env);
-  return result.message_id ?? 0;
+  const send = async (reply: boolean) => {
+    const form = new FormData();
+    form.append("chat_id", job.chatId);
+    if (reply && job.messageId) form.append("reply_to_message_id", String(job.messageId));
+    form.append("document", new Blob([new Uint8Array(content)], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }), basename(path));
+    return telegramMethod("sendDocument", form, false, env);
+  };
+  try {
+    const result = await send(true);
+    return result.message_id ?? 0;
+  } catch (error) {
+    if (!job.messageId) throw error;
+    const result = await send(false);
+    return result.message_id ?? 0;
+  }
 }
