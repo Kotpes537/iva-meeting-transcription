@@ -2,7 +2,7 @@ diff --git a/agent/lib/telegram-media.test.ts b/agent/lib/telegram-media.test.ts
 index af23399..c80944e 100644
 --- a/agent/lib/telegram-media.test.ts
 +++ b/agent/lib/telegram-media.test.ts
-@@ -140,6 +140,66 @@ function doc(): RawMedia {
+@@ -140,6 +140,82 @@ function doc(): RawMedia {
    };
  }
  
@@ -66,6 +66,22 @@ index af23399..c80944e 100644
 +  assert.equal(calls.sent.length, 1);
 +});
 +
++await test("large WAV document is handed to the meeting plugin", async (t) => {
++  process.env.IVA_MEETING_LARGE_MEDIA_HANDOFF = "1";
++  t.after(() => { delete process.env.IVA_MEETING_LARGE_MEDIA_HANDOFF; });
++  const { calls, effects } = harness({
++    request: () => Promise.resolve({ body: { description: "file is too big" } }),
++  });
++  const part = await media.processMediaPart(
++    effects,
++    { message_id: 24 },
++    { ...doc(), fileId: "wav-file-id", fileName: "meeting.wav", mimeType: "audio/wav" },
++  );
++  assert.equal(part.kind, "context");
++  assert.match(part.context[0], /file_name="meeting.wav"/u);
++  assert.equal(calls.sent.length, 0);
++});
++
  await test("чистое описание картинки едет утвердительной фразой, как раньше", async (t) => {
    stubDownload(t);
    const { effects } = harness();
@@ -73,17 +89,22 @@ diff --git a/agent/lib/telegram-media.ts b/agent/lib/telegram-media.ts
 index e97841f..23ce49d 100644
 --- a/agent/lib/telegram-media.ts
 +++ b/agent/lib/telegram-media.ts
-@@ -137,6 +137,25 @@ export async function processMediaPart(
+@@ -137,6 +137,30 @@ export async function processMediaPart(
        if (!rel) {
          const file = await fetchTelegramFile(effects.request, media.fileId);
          if (file && "tooBig" in file) {
-+          const supportedName = /\.(?:mp3|m4a)$/iu.test(media.fileName ?? "");
++          const supportedName = /\.(?:mp3|m4a|wav|flac|ogg|oga|opus|aac|webm|mp4)$/iu.test(media.fileName ?? "");
 +          const inferredName =
 +            media.mimeType === "audio/mpeg" ? "meeting.mp3" :
-+            media.mimeType === "audio/mp4" || media.mimeType === "audio/x-m4a" ? "meeting.m4a" : undefined;
++            media.mimeType === "audio/mp4" || media.mimeType === "audio/x-m4a" ? "meeting.m4a" :
++            media.mimeType === "audio/wav" || media.mimeType === "audio/x-wav" ? "meeting.wav" :
++            media.mimeType === "audio/flac" ? "meeting.flac" :
++            media.mimeType === "audio/ogg" ? "meeting.ogg" :
++            media.mimeType === "audio/aac" ? "meeting.aac" :
++            media.mimeType === "audio/webm" ? "meeting.webm" : undefined;
 +          const largeMeetingAudio =
 +            process.env.IVA_MEETING_LARGE_MEDIA_HANDOFF === "1" &&
-+            (media.tag === "document" || media.tag === "audio") &&
++            (media.tag === "document" || media.tag === "audio" || media.tag === "voice") &&
 +            (supportedName || Boolean(inferredName)) &&
 +            Boolean(media.fileId);
 +          if (largeMeetingAudio) {

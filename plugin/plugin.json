@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "meeting-transcription",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "Transcribe MP3 and M4A meetings, send summary bullets and a Word report with the full transcript to the owner's Telegram chat.",
   "extensions": { "sh.iva": {} }
 }

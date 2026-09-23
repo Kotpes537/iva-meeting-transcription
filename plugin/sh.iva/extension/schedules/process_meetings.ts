@@ -56,7 +56,7 @@ export async function processOne(job: MeetingJob, directory: string): Promise<vo
     if (!summaryReady && transcriptForFallback && metadataForFallback && !job.documentMessageId) {
       try {
         const fallbackJob = { ...job, mode: "transcript" as const };
-        const emptySummary: Summary = { overview: "", agenda: [], bullets: [], topics: [], decisions: [], tasks: [], open_questions: [] };
+        const emptySummary: Summary = { overview: "", participants: [], agenda: [], bullets: [], topics: [], decisions: [], tasks: [], open_questions: [] };
         const report = await createWord(fallbackJob, emptySummary, transcriptForFallback, metadataForFallback, directory);
         job.documentMessageId = await sendWord(job, report);
         job.documentIsFallback = true;

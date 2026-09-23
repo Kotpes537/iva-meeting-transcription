@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { cleanName, privateTarget } from "../plugin/sh.iva/extension/lib/jobs.ts";
-import { createWord, summarize, timecode, transcriptLines } from "../plugin/sh.iva/extension/lib/pipeline.ts";
+import { createWord, dateFromFileName, summarize, timecode, transcriptLines } from "../plugin/sh.iva/extension/lib/pipeline.ts";
 import { processOne } from "../plugin/sh.iva/extension/schedules/process_meetings.ts";
 
 test("the recipient comes only from an authenticated private owner turn", () => {
@@ -18,6 +18,7 @@ test("the recipient comes only from an authenticated private owner turn", () => 
 test("audio filenames are constrained and timing preserves both ends", () => {
   assert.equal(cleanName("Встреча.m4a"), "Встреча.m4a");
   assert.equal(cleanName("meeting.MP3"), "meeting.MP3");
+  for (const ext of ["wav", "flac", "ogg", "oga", "opus", "aac", "webm", "mp4"]) assert.equal(cleanName(`meeting.${ext}`), `meeting.${ext}`);
   assert.throws(() => cleanName("../secret.mp3"));
   assert.throws(() => cleanName("meeting.exe"));
   assert.equal(timecode(1576.8), "00:26:16");
@@ -28,6 +29,7 @@ test("all three Word modes produce nonempty DOCX files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "iva-meeting-test-"));
   const summary = {
     bullets: ["Обсудили вопрос [00:00:01].", "Назвали следующий шаг [00:00:02]."],
+    participants: [{ name: "Анна", role: "руководитель", evidence: "[00:00:01]" }],
     topics: ["Тема"], decisions: [],
     tasks: [{ task: "Проверить", owner: "не назван", due: "не назван", evidence: "[00:00:01]" }],
     open_questions: [],
@@ -54,9 +56,10 @@ test("the selected Iva model can summarize without a Gemini key", async () => {
   const summary = await summarize(utterances, async (system, prompt) => {
     called = true;
     assert.match(system, /не придумывай имена/iu);
-    assert.match(prompt, /\[00:00:01\] Первый вопрос/u);
+    assert.match(prompt, /\[00:00:01\] Спикер \?: Первый вопрос/u);
     return JSON.stringify({
       overview: "Обсудили два вопроса.", agenda: ["Первый вопрос", "Второй вопрос"],
+      participants: [{ name: "Анна", role: "руководитель", evidence: "[00:00:01]" }],
       bullets: [
         { text: "Обсудили первый вопрос.", evidence: "[00:00:01]" },
         "Проверят второй вопрос [00:00:03].",
@@ -67,6 +70,12 @@ test("the selected Iva model can summarize without a Gemini key", async () => {
   assert.equal(called, true);
   assert.equal(summary.bullets.length, 2);
   assert.equal(summary.bullets[0], "Обсудили первый вопрос. [00:00:01]");
+  assert.equal(summary.participants[0].name, "Анна");
+});
+
+test("recording date is accepted only when the filename encodes a valid time", () => {
+  assert.match(dateFromFileName("Голос 260723_160511.wav"), /2026-07-23 16:05:11/u);
+  assert.match(dateFromFileName("Голос 260231_160511.wav"), /не установлены/u);
 });
 
 test("summary failure still sends the full transcript as a Word file", async () => {

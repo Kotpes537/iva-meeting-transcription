@@ -4,6 +4,12 @@ import { copyFile, mkdir, open, readFile, realpath, stat, statfs, writeFile } fr
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type Mode = "bullets" | "transcript" | "both";
+export const AUDIO_MIME_TYPES: Readonly<Record<string, string>> = {
+  ".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav",
+  ".flac": "audio/flac", ".ogg": "audio/ogg", ".oga": "audio/ogg",
+  ".opus": "audio/ogg", ".aac": "audio/aac", ".webm": "audio/webm",
+  ".mp4": "audio/mp4",
+};
 export type MeetingJob = {
   id: string;
   state: "queued" | "working" | "bullets_sent" | "done" | "failed";
@@ -33,8 +39,8 @@ export function cleanName(value: string): string {
   const name = basename(value.normalize("NFC"));
   if (name !== value.normalize("NFC") || name.startsWith(".") || name.length > 180 || /[\x00-\x1f\x7f]/u.test(name))
     throw new Error("invalid audio filename");
-  if (![".m4a", ".mp3"].includes(extname(name).toLowerCase()))
-    throw new Error("only .m4a and .mp3 are supported");
+  if (!AUDIO_MIME_TYPES[extname(name).toLowerCase()])
+    throw new Error("unsupported audio format");
   return name;
 }
 
