@@ -73,6 +73,26 @@ test("the selected Iva model can summarize without a Gemini key", async () => {
   assert.equal(summary.participants[0].name, "Анна");
 });
 
+test("summary rejects mentioned third parties and missing issue counts", async () => {
+  const utterances = [{ start: 1, end: 2, transcript: "Посоветоваться с Димой. Решили проверить отчёт." }];
+  const base = {
+    overview: "Проверка отчёта.", agenda: ["Отчёт"],
+    participants: [{ name: "Дима", role: "Участник, упомянутый в разговоре", evidence: "[00:00:01]" }],
+    bullets: ["Обсудили отчёт [00:00:01]", "Решили проверить [00:00:01]"],
+    decisions: [{ decision: "Проверить отчёт", evidence: "[00:00:01]" }], tasks: [], open_questions: [],
+  };
+  let calls = 0;
+  const recovered = await summarize(utterances, async () => {
+    calls++;
+    return JSON.stringify({ ...base, topics: calls === 1 ? [] : ["Проверка отчёта"] });
+  });
+  assert.equal(calls, 2);
+  assert.deepEqual(recovered.topics, ["Проверка отчёта"]);
+  const summary = await summarize(utterances, async () => JSON.stringify({ ...base, topics: [{ issue: "Проверка отчёта", evidence: "[00:00:01]" }] }));
+  assert.deepEqual(summary.participants, []);
+  assert.deepEqual(summary.topics, ["Проверка отчёта"]);
+});
+
 test("recording date is accepted only when the filename encodes a valid time", () => {
   assert.match(dateFromFileName("Голос 260723_160511.wav"), /2026-07-23 16:05:11/u);
   assert.match(dateFromFileName("Голос 260231_160511.wav"), /не установлены/u);
