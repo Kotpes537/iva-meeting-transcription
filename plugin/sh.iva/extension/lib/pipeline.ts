@@ -171,6 +171,20 @@ export function timecode(seconds: number): string {
   return `${String(Math.floor(value / 3600)).padStart(2, "0")}:${String(Math.floor(value / 60) % 60).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
 
+export function reportFileName(fileName: string, mode: MeetingJob["mode"]): string {
+  const stem = basename(fileName, extname(fileName))
+    .replace(/[<>:"/\\|?*\x00-\x1f]/gu, "_")
+    .replace(/[. ]+$/u, "")
+    .trim()
+    .slice(0, 140) || "Встреча";
+  const label = mode === "transcript"
+    ? "полный транскрипт"
+    : mode === "bullets"
+      ? "краткие итоги и полный транскрипт"
+      : "итоги и полный транскрипт";
+  return `${stem} — ${label}.docx`;
+}
+
 export function transcriptLines(utterances: Utterance[]): string[] {
   return utterances.map((u) =>
     `[${timecode(u.start)}–${timecode(u.end)}] Спикер ${Number.isInteger(u.speaker) ? Number(u.speaker) + 1 : "?"}: ${u.transcript}`,
@@ -362,7 +376,7 @@ export async function createWord(job: MeetingJob, summary: Summary, utterances: 
     ] }));
   }
   const doc = new Document({ sections: [{ children }] });
-  const target = join(directory, `meeting-${job.id}-${job.mode}.docx`);
+  const target = join(directory, reportFileName(job.fileName, job.mode));
   const buffer = await Packer.toBuffer(doc);
   if (!buffer.length || buffer.length > 50_000_000) throw new Error("Word report exceeds Telegram upload limit");
   await writeFile(target, buffer, { mode: 0o600 });

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { cleanName, privateTarget } from "../plugin/sh.iva/extension/lib/jobs.ts";
-import { createWord, dateFromFileName, summarize, telegramBullets, timecode, transcriptLines } from "../plugin/sh.iva/extension/lib/pipeline.ts";
+import { createWord, dateFromFileName, reportFileName, summarize, telegramBullets, timecode, transcriptLines } from "../plugin/sh.iva/extension/lib/pipeline.ts";
 import { processOne } from "../plugin/sh.iva/extension/schedules/process_meetings.ts";
 
 test("the recipient comes only from an authenticated private owner turn", () => {
@@ -45,6 +45,11 @@ test("all three Word modes produce nonempty DOCX files", async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("Word filename uses the recording name and readable mode", () => {
+  assert.equal(reportFileName("Голос 260723_160511.m4a", "both"), "Голос 260723_160511 — итоги и полный транскрипт.docx");
+  assert.equal(reportFileName("meeting:final.mp3", "transcript"), "meeting_final — полный транскрипт.docx");
 });
 
 test("the selected Iva model can summarize without a Gemini key", async () => {
@@ -140,7 +145,7 @@ test("summary failure still sends the full transcript as a Word file", async () 
     assert.equal(saved.documentMessageId, 99);
     assert.equal(saved.documentIsFallback, true);
     assert.deepEqual(replies, ["456", null]);
-    assert.ok((await stat(join(directory, `meeting-${id}-transcript.docx`))).size > 5_000);
+    assert.ok((await stat(join(directory, "meeting — полный транскрипт.docx"))).size > 5_000);
   } finally {
     globalThis.fetch = originalFetch;
     for (const [name, value] of [["ASSISTANT_DATA_DIR", originalDataDir], ["TELEGRAM_BOT_TOKEN", originalToken], ["TELEGRAM_ALLOWED_USER_IDS", originalAllowed]]) {
