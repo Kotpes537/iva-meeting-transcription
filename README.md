@@ -21,7 +21,7 @@ Iva 0.4.7 с настроенным `MODEL_PROVIDER`, Node.js 24, `ffprobe` и `
 Сначала сделайте резервную копию работающей сборки Iva и загрузите репозиторий на сервер. Команды ниже приведены для повторной установки или другого сервера. Штатная команда `iva plugin add` создаёт новую версию Iva, поэтому совместимый патч для файлов больше 20 МБ нужно применять **после** установки плагина к новой активной версии.
 
 ```bash
-git clone --branch v0.3.1 https://github.com/Kotpes537/iva-meeting-transcription.git
+git clone --branch v0.3.2 https://github.com/Kotpes537/iva-meeting-transcription.git
 ```
 
 Плагин использует уже выбранные в Iva модель и доступ к ней. Установите его штатной командой:
@@ -30,7 +30,7 @@ git clone --branch v0.3.1 https://github.com/Kotpes537/iva-meeting-transcription
 cd /path/to/iva-meeting-transcription
 pnpm install --frozen-lockfile
 pnpm run check
-iva plugin add Kotpes537/iva-meeting-transcription/plugin@v0.3.1
+iva plugin add Kotpes537/iva-meeting-transcription/plugin@v0.3.2
 iva plugin list
 iva doctor
 ```

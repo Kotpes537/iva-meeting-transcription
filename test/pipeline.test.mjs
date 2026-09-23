@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { cleanName, privateTarget } from "../plugin/sh.iva/extension/lib/jobs.ts";
-import { createWord, dateFromFileName, summarize, timecode, transcriptLines } from "../plugin/sh.iva/extension/lib/pipeline.ts";
+import { createWord, dateFromFileName, summarize, telegramBullets, timecode, transcriptLines } from "../plugin/sh.iva/extension/lib/pipeline.ts";
 import { processOne } from "../plugin/sh.iva/extension/schedules/process_meetings.ts";
 
 test("the recipient comes only from an authenticated private owner turn", () => {
@@ -91,6 +91,17 @@ test("summary rejects mentioned third parties and missing issue counts", async (
   const summary = await summarize(utterances, async () => JSON.stringify({ ...base, topics: [{ issue: "Проверка отчёта", evidence: "[00:00:01]" }] }));
   assert.deepEqual(summary.participants, []);
   assert.deepEqual(summary.topics, ["Проверка отчёта"]);
+});
+
+test("Telegram summary is human readable and includes tasks without technical timings", () => {
+  const text = telegramBullets({
+    overview: "", participants: [], agenda: [],
+    bullets: ["Проверить отчёт [00:01:02]"], topics: ["Отчёт"], decisions: [],
+    tasks: [{ task: "Проверить отчёт", owner: "Анна", due: "до пятницы", evidence: "[00:01:02]" }], open_questions: [],
+  }, { dateLabel: "2026-07-23" });
+  assert.match(text, /^Итоги встречи\n/u);
+  assert.doesNotMatch(text, /2026-07-23|00:01:02|метаданные/u);
+  assert.match(text, /Задачи:\n• Проверить отчёт — ответственный: Анна; срок: до пятницы/u);
 });
 
 test("recording date is accepted only when the filename encodes a valid time", () => {

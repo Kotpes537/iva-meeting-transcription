@@ -369,14 +369,24 @@ export async function createWord(job: MeetingJob, summary: Summary, utterances: 
   return target;
 }
 
-export function telegramBullets(summary: Summary, metadata: { dateLabel: string }): string {
+function withoutTiming(value: string): string {
+  return value.replace(/\s*\[\d{2}:\d{2}:\d{2}\]/gu, "").trim();
+}
+
+export function telegramBullets(summary: Summary, _metadata: { dateLabel: string }): string {
   const lines = [
-    `Итоги встречи (${metadata.dateLabel})`,
-    ...summary.bullets.map((x) => `• ${x}`),
+    "Итоги встречи",
+    ...summary.bullets.map((x) => `• ${withoutTiming(x)}`),
     "",
     `Обсуждено вопросов и проблем: ${summary.topics.length}; принято решений: ${summary.decisions.length}; осталось без решения: ${summary.open_questions.length}.`,
-    "Автоматический итог: числа и имена сверяйте с записью.",
   ];
+  if (summary.tasks.length) {
+    lines.push("", "Задачи:");
+    for (const task of summary.tasks) {
+      lines.push(`• ${withoutTiming(task.task)} — ответственный: ${task.owner || "не назван"}; срок: ${task.due || "не назван"}`);
+    }
+  }
+  lines.push("", "Автоматический итог: числа и имена сверяйте с записью.");
   return lines.join("\n").slice(0, 3900);
 }
 
